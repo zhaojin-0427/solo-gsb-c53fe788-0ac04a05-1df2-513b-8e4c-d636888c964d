@@ -22,11 +22,23 @@ a component the chain with the fewest switches is found on a small DAG
 (window -> later-ending, positively-overlapping window of another station);
 equal switch counts are adjudicated lexicographically by the station-ID
 sequence, so the result is stable. Across components the longest span wins;
-equal spans prefer fewer switches, then the earlier start, then station IDs.
+spans of exactly equal length prefer fewer switches, then the earlier
+start, then station IDs.
 
 Time that no station proves visible but some station reports as uncovered is
 returned in ``unknown_intervals`` -- never as "definitely invisible" and
 never as coverage.
+
+Time representation
+-------------------
+Every instant entering the planner is converted to float seconds after the
+search start *through* whole microseconds -- the 1 us reporting resolution
+of the UTC timestamps. All endpoints therefore sit on one exact
+microsecond grid, and every comparison below is exact (no epsilon
+tolerance): a 1 us gap between one station's windows is a real gap, a 1 us
+overlap between two stations' windows is a positive overlap that allows a
+handover, a 1 us unknown interval is reported rather than swallowed, and a
+plan longer by 1 us wins outright.
 """
 from __future__ import annotations
 
@@ -38,9 +50,19 @@ from .geometry import Station
 from .mechanics import TwoBodyOrbit
 from .passes import _merge, _subtract, find_passes
 
-# Mirrors the 1 us reporting resolution of the UTC timestamps: window
-# endpoints further apart than this are distinct instants.
-TIME_EPS = 1.0e-6
+_US_PER_S = 1_000_000
+
+
+def _seconds(delta: timedelta) -> float:
+    """Microsecond-exact ``delta`` as float seconds.
+
+    A ``timedelta`` carries whole microseconds; forming the total in
+    integer microseconds first and dividing once puts every endpoint on
+    the 1 us reporting grid of the UTC timestamps. Distinct instants then
+    map to distinct floats, so planner comparisons need no tolerance.
+    """
+    us = delta.days * 86_400_000_000 + delta.seconds * _US_PER_S + delta.microseconds
+    return us / _US_PER_S
 
 
 # --------------------------------------------------------------- data types
@@ -126,8 +148,10 @@ class RelayResult:
 class _Node:
     """A proven-visible span in seconds-after-search-start coordinates.
 
-    A node may cluster several abutting windows of one station (which need
-    no handover between them); ``members`` are the original windows.
+    Coordinates are microsecond-quantized (see :func:`_seconds`), so exact
+    comparisons decide abut/overlap. A node may cluster several abutting
+    windows of one station (which need no handover between them);
+    ``members`` are the original windows.
     """
     station_id: str
     s: float
@@ -143,9 +167,10 @@ class _Node:
 
 
 def _cluster_station_windows(nodes: list[_Node]) -> list[_Node]:
-    """Join windows of one station that overlap or abut into one continuous
-    proven span: handing over to oneself at a shared endpoint is not a
-    switch. Windows of one station have disjoint interiors, so a simple
+    """Join windows of one station that overlap or abut exactly into one
+    continuous proven span: handing over to oneself at a shared endpoint is
+    not a switch. A gap of even 1 us is a real gap and keeps the spans
+    separate. Windows of one station have disjoint interiors, so a simple
     sweep suffices."""
     out: list[_Node] = []
     by_station: dict[str, list[_Node]] = {}
@@ -155,7 +180,7 @@ def _cluster_station_windows(nodes: list[_Node]) -> list[_Node]:
         group.sort(key=lambda n: (n.s, n.e))
         cur: Optional[_Node] = None
         for n in group:
-            if cur is not None and n.s <= cur.e + TIME_EPS:
+            if cur is not None and n.s <= cur.e:
                 cur.e = max(cur.e, n.e)
                 cur.end_open = cur.end_open or n.end_open
                 cur.truncated = cur.truncated or n.truncated
@@ -174,10 +199,10 @@ def _build_components(nodes: list[_Node]) -> list[list[_Node]]:
     """Group proven spans into continuously coverable components.
 
     A span joins a component when either (a) one of *another* station's
-    spans in it overlaps with strictly positive duration, or (b) one of
-    the *same* station's spans abuts/overlaps (already clustered, so this
-    only covers identical/duplicate geometry). A span can bridge several
-    existing components at once; they are then merged.
+    spans in it overlaps with strictly positive duration (1 us suffices),
+    or (b) one of the *same* station's spans abuts/overlaps (already
+    clustered, so this only covers identical/duplicate geometry). A span
+    can bridge several existing components at once; they are then merged.
     """
     comps: list[dict] = []
     for idx in sorted(range(len(nodes)), key=lambda i: (nodes[i].s, nodes[i].e)):
@@ -185,9 +210,9 @@ def _build_components(nodes: list[_Node]) -> list[list[_Node]]:
         hits = []
         for c in comps:
             same_station_end = c["stat_end"].get(w.station_id, -1e300)
-            if same_station_end >= w.s - TIME_EPS:
+            if same_station_end >= w.s:
                 hits.append(c)  # abutting/overlapping span of same station
-            elif c["end"] > w.s + TIME_EPS:
+            elif c["end"] > w.s:
                 # Union reaches beyond this span's start; every span so far
                 # starts no later than this one (sweep order), so the
                 # extending span starts before w ends and overlaps it for
@@ -242,7 +267,7 @@ def _best_chain(comp: list[_Node]) -> Optional[list[_Node]]:
     # with zero switches. Seeds must exist before edge relaxation, otherwise
     # an incoming edge could pre-label an origin span with hops > 0.
     for w in comp:
-        if w.s <= cstart + TIME_EPS:
+        if w.s <= cstart:
             labels[w] = _Label(0, (w.station_id,), None)
 
     for u in sorted(comp, key=lambda w: (w.e, w.s)):
@@ -252,18 +277,18 @@ def _best_chain(comp: list[_Node]) -> Optional[list[_Node]]:
         for v in comp:
             if v.station_id == u.station_id:
                 continue
-            if v.s < u.s - TIME_EPS:
+            if v.s < u.s:
                 continue  # would hand over backwards in time
-            if v.e <= u.e + TIME_EPS:
+            if v.e <= u.e:
                 continue  # must extend the reach
             overlap = min(u.e, v.e) - max(u.s, v.s)
-            if overlap <= TIME_EPS:
+            if overlap <= 0.0:
                 continue  # endpoints touching is not a positive overlap
             cand = _Label(lu.hops + 1, lu.chain_ids + (v.station_id,), u)
             if better(cand, labels.get(v)):
                 labels[v] = cand
 
-    terminals = [w for w in comp if w.e >= cend - TIME_EPS]
+    terminals = [w for w in comp if w.e >= cend]
     reachable = [w for w in terminals if w in labels]
     if not reachable:
         return None
@@ -280,7 +305,7 @@ def _best_chain(comp: list[_Node]) -> Optional[list[_Node]]:
     # strictly ordered (equal starts would mean a zero-length segment,
     # which the minimum-hop optimum never contains).
     for a, b in zip(chain, chain[1:]):
-        if b.s <= a.s + TIME_EPS:
+        if b.s <= a.s:
             return None
     return chain
 
@@ -315,14 +340,16 @@ def _chain_to_plan(chain: list[_Node], t_start: datetime) -> RelayPlan:
 
 # ------------------------------------------------------------- unknown time
 def _merge_uncovered(raw: list[tuple[float, float, str]]):
-    """Merge (start, end, 'station: reason') triples that overlap or abut;
-    every distinct contributor reason is kept on the merged interval."""
+    """Merge (start, end, 'station: reason') triples that overlap or abut
+    exactly; every distinct contributor reason is kept on the merged
+    interval. A 1 us gap between two uncovered spans is real proven or
+    unknown-free time and is *not* bridged."""
     if not raw:
         return []
     raw = sorted(raw, key=lambda x: (x[0], x[1]))
     out: list[list] = [[raw[0][0], raw[0][1], [raw[0][2]]]]
     for a, b, why in raw[1:]:
-        if a <= out[-1][1] + TIME_EPS:
+        if a <= out[-1][1]:
             out[-1][1] = max(out[-1][1], b)
             if why not in out[-1][2]:
                 out[-1][2].append(why)
@@ -342,7 +369,7 @@ def plan_relay(
     epoch = epoch.astimezone(timezone.utc)
     t_start = t_start.astimezone(timezone.utc)
     t_end = t_end.astimezone(timezone.utc)
-    span_s = (t_end - t_start).total_seconds()
+    span_s = _seconds(t_end - t_start)
 
     station_results: list[StationRelayResult] = []
     nodes: list[_Node] = []
@@ -367,20 +394,24 @@ def plan_relay(
                 end_open=w.end_open,
                 truncated=w.truncated,
             ))
+            s = max(0.0, _seconds(w.start - t_start))
+            e = min(span_s, _seconds(w.end - t_start))
+            if e <= s:
+                continue  # clipped to nothing: no coverable time
             nodes.append(_Node(
                 station_id=sin.id,
-                s=max(0.0, (w.start - t_start).total_seconds()),
-                e=min(span_s, (w.end - t_start).total_seconds()),
+                s=s,
+                e=e,
                 start_open=w.start_open,
                 end_open=w.end_open,
                 truncated=w.truncated,
             ))
         uncovered: list[StationUncovered] = []
         for u in res.uncovered:
-            a = max(0.0, (u.start - t_start).total_seconds())
-            b = min(span_s, (u.end - t_start).total_seconds())
-            if b - a <= TIME_EPS:
-                continue
+            a = max(0.0, _seconds(u.start - t_start))
+            b = min(span_s, _seconds(u.end - t_start))
+            if b <= a:
+                continue  # empty after clipping; a 1 us sliver is kept
             uncovered.append(StationUncovered(
                 start=t_start + timedelta(seconds=a),
                 end=t_start + timedelta(seconds=b),
@@ -404,8 +435,9 @@ def plan_relay(
         cend = max(w.e for w in chain)
         duration = cend - cstart
         ids = tuple(w.station_id for w in chain)
-        # Longest duration (1 us resolution); then fewest switches,
-        # earliest start, lexicographically smallest ID sequence.
+        # Longest duration, exactly (a 1 us edge decides); only spans of
+        # identical length fall through to fewest switches, earliest start,
+        # lexicographically smallest ID sequence.
         if best_chain is None or _plan_better(
                 duration, len(chain) - 1, cstart, ids,
                 best_key[0], best_key[1], best_key[2], best_key[3]):
@@ -424,11 +456,11 @@ def plan_relay(
         reason_at[(a, b)] = why
     unknown = []
     for a, b in unknown_pieces:
-        if b - a <= TIME_EPS:
-            continue
+        if b <= a:
+            continue  # nothing left after subtracting proven visibility
         why = "; ".join(
             w for (x, y), w in sorted(reason_at.items())
-            if y > a + TIME_EPS and x < b - TIME_EPS
+            if y > a and x < b
         )
         unknown.append(UnknownInterval(
             start=t_start + timedelta(seconds=a),
@@ -457,12 +489,15 @@ def plan_relay(
 
 def _plan_better(dur, switches, start, ids,
                  b_dur, b_switches, b_start, b_ids) -> bool:
-    if dur > b_dur + TIME_EPS:
-        return True
-    if dur < b_dur - TIME_EPS:
-        return False
+    """Exact lexicographic plan ordering on the microsecond grid.
+
+    Duration decides first -- a plan longer by even 1 us wins; only spans
+    of identical length are adjudicated by switch count, then start
+    instant, then the station-ID sequence."""
+    if dur != b_dur:
+        return dur > b_dur
     if switches != b_switches:
         return switches < b_switches
-    if abs(start - b_start) > TIME_EPS:
+    if start != b_start:
         return start < b_start
     return ids < b_ids

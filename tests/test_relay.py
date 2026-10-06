@@ -156,6 +156,34 @@ def test_longest_component_wins_even_if_second():
     assert best.switches[0].to_station_id == "D"
 
 
+# ------------------------------------------- microsecond endpoint exactness
+US = 1.0e-6  # one reporting microsecond, in seconds
+
+
+def test_same_station_abut_exactly_joins_but_one_us_gap_splits():
+    joined = _cluster_station_windows([node("A", 0, 10), node("A", 10, 20)])
+    assert len(joined) == 1 and joined[0].e == 20.0
+    # a 1 us gap is a real gap: no join, two separate components
+    apart = _cluster_station_windows([node("A", 0, 10), node("A", 10 + US, 20)])
+    assert len(apart) == 2
+    assert len(_build_components(apart)) == 2
+
+
+def test_one_us_overlap_between_stations_allows_handover():
+    nodes = [node("A", 0, 10), node("B", 10 - US, 20)]
+    comps = _build_components(nodes)
+    assert len(comps) == 1
+    assert chain_ids(_best_chain(comps[0])) == ["A", "B"]
+
+
+def test_one_us_overlap_bridge_joins_components():
+    # B overlaps A and C by only 1 us each: still one coverable span.
+    nodes = [node("A", 0, 10), node("C", 20, 30), node("B", 10 - US, 20 + US)]
+    comps = _build_components(nodes)
+    assert len(comps) == 1
+    assert chain_ids(_best_chain(comps[0])) == ["A", "B", "C"]
+
+
 # -------------------------------------------------- plan_relay integration
 class _FakeOrbit:
     pass
@@ -327,3 +355,86 @@ def test_no_claim_when_nobody_visible_and_uncovered(monkeypatch):
     assert res.plan is None
     assert res.status == "failed"
     assert len(res.unknown) == 1
+
+
+# -------------------------------------------------- 1 us plan-level cases
+def _relay_with(monkeypatch, table, span_s=60.0):
+    """Run plan_relay with find_passes stubbed to ``table``."""
+    import app.relay as relay
+
+    def fake_find_passes(orbit, station, epoch, t_start, t_end,
+                         min_elevation_deg):
+        return _make_result(station.tag, *table[station.tag])
+
+    monkeypatch.setattr(relay, "find_passes", fake_find_passes)
+    return plan_relay(
+        orbit=_FakeOrbit(),
+        station_inputs=[
+            StationInput(tag, _TaggedStation(tag), 10.0) for tag in table
+        ],
+        epoch=T0,
+        t_start=T0,
+        t_end=T0 + timedelta(seconds=span_s),
+    )
+
+
+def test_one_us_gap_between_same_station_windows_breaks_relay(monkeypatch):
+    # A's two windows are 1 us apart: no continuous chain spans the gap,
+    # so the plan covers only the longer side.
+    res = _relay_with(monkeypatch, {"A": ([(0.0, 10.0), (10.0 + US, 30.0)], [])})
+    assert res.plan is not None
+    assert [g.station_id for g in res.plan.segments] == ["A"]
+    assert res.plan.duration_s < 20.0  # 19.999999 s: the 1 us gap is real
+
+
+def test_one_us_overlap_handover_in_plan(monkeypatch):
+    res = _relay_with(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "B": ([(10.0 - US, 20.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["A", "B"]
+    assert res.plan.duration_s == 20.0
+    assert len(res.plan.switches) == 1
+
+
+def test_one_us_unknown_interval_not_swallowed(monkeypatch):
+    res = _relay_with(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "B": ([], [(40.0, 40.0 + US, "grazing unresolved")]),
+    })
+    assert res.status == "partial"  # not "complete"
+    assert len(res.unknown) == 1
+    u = res.unknown[0]
+    assert u.start == T0 + timedelta(seconds=40)
+    assert u.end == T0 + timedelta(seconds=40, microseconds=1)
+    assert "B" in u.reason
+    # the station-level 1 us uncovered interval is reported too
+    assert len(res.stations[1].uncovered) == 1
+
+
+def test_one_us_unknown_with_no_windows_is_failed_not_complete(monkeypatch):
+    res = _relay_with(monkeypatch,
+                      {"A": ([], [(30.0, 30.0 + US, "grazing unresolved")])})
+    assert res.plan is None
+    assert res.status == "failed"
+    assert len(res.unknown) == 1
+
+
+def test_plan_one_us_longer_wins_over_fewer_switches(monkeypatch):
+    # Chain A->B reaches 1 us further than C alone; duration decides first.
+    res = _relay_with(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "B": ([(9.0, 20.0 + US)], []),
+        "C": ([(0.0, 20.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["A", "B"]
+    assert res.plan.duration_s == 20.0 + US
+
+
+def test_exactly_equal_durations_fall_back_to_switch_count(monkeypatch):
+    res = _relay_with(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "B": ([(9.0, 20.0)], []),
+        "C": ([(0.0, 20.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["C"]
