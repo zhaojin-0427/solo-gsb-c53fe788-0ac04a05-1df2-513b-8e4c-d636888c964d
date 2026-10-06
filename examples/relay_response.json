@@ -142,8 +142,8 @@
   "search_end": "2025-06-01T00:30:00Z",
   "diagnostics": {
     "search_span_s": 1800.0,
-    "proven_visible_seconds": 750.3395439999999,
-    "proven_visible_fraction": 0.41685530222222217,
+    "proven_visible_seconds": 750.339544,
+    "proven_visible_fraction": 0.4168553022222222,
     "unknown_seconds": 0.0,
     "relay_covered_seconds": 750.339544,
     "relay_coverage_fraction": 0.4168553022222222,

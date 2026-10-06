@@ -19,9 +19,19 @@ from app.relay import (
 
 T0 = datetime(2025, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
 
+US = 1_000_000  # planner coordinates are integer microseconds
+
 
 def node(sid, s, e, start_open=False, end_open=False, truncated=False):
-    return _Node(sid, float(s), float(e), start_open, end_open, truncated)
+    # s/e in seconds; the planner works in integer microseconds.
+    return _Node(sid, int(round(s * US)), int(round(e * US)),
+                 start_open, end_open, truncated)
+
+
+def node_us(sid, s_us, e_us, start_open=False, end_open=False,
+            truncated=False):
+    # s_us/e_us already in integer microseconds.
+    return _Node(sid, int(s_us), int(e_us), start_open, end_open, truncated)
 
 
 def chain_ids(chain):
@@ -50,14 +60,52 @@ def test_components_join_on_endpoint_touch_same_station():
     clustered = _cluster_station_windows(nodes)
     comps = _build_components(clustered)
     assert len(comps) == 1
-    assert comps[0][0].s == 0.0 and comps[0][0].e == 20.0
+    assert comps[0][0].s == 0.0 and comps[0][0].e == 20.0 * US
+
+
+# ------------------------------------------------------ microsecond edges
+def test_same_station_microsecond_gap_not_joined():
+    # Two windows of one station separated by exactly 1 us: the hole is a
+    # real gap at the reporting resolution, not a shared endpoint, so the
+    # spans must stay separate.
+    nodes = _cluster_station_windows([
+        node_us("A", 0, 10 * US), node_us("A", 10 * US + 1, 20 * US),
+    ])
+    assert len(nodes) == 2
+    assert len(_build_components(nodes)) == 2
+
+
+def test_same_station_exact_abut_joins():
+    nodes = _cluster_station_windows([
+        node_us("A", 0, 10 * US), node_us("A", 10 * US, 20 * US),
+    ])
+    assert len(nodes) == 1
+    assert (nodes[0].s, nodes[0].e) == (0, 20 * US)
+
+
+def test_cross_station_microsecond_overlap_allows_switch():
+    # A 1 us positive overlap between different stations is a legal
+    # handover: one component, one switch at the incoming window's rise.
+    nodes = [node_us("A", 0, 10 * US), node_us("B", 10 * US - 1, 20 * US)]
+    comps = _build_components(nodes)
+    assert len(comps) == 1
+    chain = _best_chain(comps[0])
+    assert chain_ids(chain) == ["A", "B"]
+    plan = _chain_to_plan(chain, T0)
+    assert plan.switches[0].time == T0 + timedelta(seconds=10, microseconds=-1)
+    assert plan.duration_s == 20.0
+
+
+def test_cross_station_endpoint_touch_still_splits():
+    nodes = [node_us("A", 0, 10 * US), node_us("B", 10 * US, 20 * US)]
+    assert len(_build_components(nodes)) == 2
 
 
 def test_clustered_same_station_span_needs_no_switch():
     nodes = _cluster_station_windows([node("A", 0, 10), node("A", 10, 25)])
     chain = _best_chain(_build_components(nodes)[0])
     assert chain_ids(chain) == ["A"]
-    assert chain[0].s == 0.0 and chain[0].e == 25.0
+    assert chain[0].s == 0.0 and chain[0].e == 25.0 * US
 
 
 def test_components_bridge_merges_several_components():
@@ -327,3 +375,103 @@ def test_no_claim_when_nobody_visible_and_uncovered(monkeypatch):
     assert res.plan is None
     assert res.status == "failed"
     assert len(res.unknown) == 1
+
+
+# ------------------------------------------- microsecond endpoint handling
+def _run_fake(monkeypatch, table, t_end_s=200.0):
+    """plan_relay with find_passes replaced by a static per-station table."""
+    import app.relay as relay
+
+    def fake_find_passes(orbit, station, epoch, t_start, t_end,
+                         min_elevation_deg):
+        wins, unc = table[station.tag]
+        return _make_result(station.tag, wins, unc)
+
+    monkeypatch.setattr(relay, "find_passes", fake_find_passes)
+    return plan_relay(
+        orbit=_FakeOrbit(),
+        station_inputs=[StationInput(tag, _TaggedStation(tag), 10.0)
+                        for tag in table],
+        epoch=T0,
+        t_start=T0,
+        t_end=T0 + timedelta(seconds=t_end_s),
+    )
+
+
+def test_plan_relay_microsecond_gap_breaks_continuity(monkeypatch):
+    # A's two windows are 1 us apart: a real hole, so two components; the
+    # plan covers only the longer one. The hole itself is *proven
+    # invisible* (find_passes reported no uncovered), so nothing unknown.
+    res = _run_fake(monkeypatch, {
+        "A": ([(0.0, 10.0), (10.000001, 25.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["A"]
+    assert res.plan.start == T0 + timedelta(seconds=10, microseconds=1)
+    assert res.plan.end == T0 + timedelta(seconds=25)
+    assert res.status == "complete"
+    assert res.unknown == []
+
+
+def test_plan_relay_microsecond_overlap_hands_over(monkeypatch):
+    # A and B overlap by exactly 1 us: a legal handover, one switch.
+    res = _run_fake(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "B": ([(9.999999, 20.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["A", "B"]
+    assert len(res.plan.switches) == 1
+    sw = res.plan.switches[0]
+    assert sw.time == T0 + timedelta(seconds=9, microseconds=999999)
+    assert (sw.from_station_id, sw.to_station_id) == ("A", "B")
+    assert res.plan.duration_s == 20.0
+
+
+def test_plan_relay_microsecond_unknown_not_swallowed(monkeypatch):
+    # A 1 us uncovered sliver, nobody proven visible: it must surface as an
+    # unknown interval and force status failed, never vanish into complete.
+    res = _run_fake(monkeypatch, {
+        "A": ([], [(40.0, 40.000001, "grazing unresolved")]),
+    })
+    assert res.plan is None
+    assert res.status == "failed"
+    assert len(res.unknown) == 1
+    u = res.unknown[0]
+    assert u.start == T0 + timedelta(seconds=40)
+    assert u.end == T0 + timedelta(seconds=40, microseconds=1)
+    assert "A" in u.reason
+
+
+def test_plan_relay_microsecond_unknown_next_to_window(monkeypatch):
+    # A 1 us unknown sliver right after a proven window: plan exists but
+    # status is partial, not complete.
+    res = _run_fake(monkeypatch, {
+        "A": ([(0.0, 10.0)], [(10.0, 10.000001, "grazing unresolved")]),
+    })
+    assert res.plan is not None
+    assert res.status == "partial"
+    assert len(res.unknown) == 1
+    assert res.unknown[0].end == T0 + timedelta(seconds=10, microseconds=1)
+
+
+def test_plan_relay_one_microsecond_longer_wins(monkeypatch):
+    # Component Y->Z is exactly 1 us longer than A's solo span; it must win
+    # even though it needs a switch and A does not.
+    res = _run_fake(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "Y": ([(100.0, 105.0)], []),
+        "Z": ([(104.0, 110.000001)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["Y", "Z"]
+    assert res.plan.duration_s == 10.000001
+
+
+def test_plan_relay_equal_duration_falls_back_to_switches(monkeypatch):
+    # A alone spans 10 s; Y->Z spans exactly the same 10 s with one switch.
+    # Exactly equal durations: fewer switches wins.
+    res = _run_fake(monkeypatch, {
+        "A": ([(0.0, 10.0)], []),
+        "Y": ([(100.0, 105.0)], []),
+        "Z": ([(104.0, 110.0)], []),
+    })
+    assert [g.station_id for g in res.plan.segments] == ["A"]
+    assert res.plan.duration_s == 10.0
