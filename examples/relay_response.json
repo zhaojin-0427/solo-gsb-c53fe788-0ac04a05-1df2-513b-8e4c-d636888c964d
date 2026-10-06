@@ -1,0 +1,152 @@
+{
+  "status": "complete",
+  "plan": {
+    "start": "2025-06-01T00:01:05.760119Z",
+    "end": "2025-06-01T00:13:36.099663Z",
+    "duration_s": 750.339544,
+    "switch_count": 4,
+    "segments": [
+      {
+        "station_id": "ULN",
+        "start": "2025-06-01T00:01:05.760119Z",
+        "end": "2025-06-01T00:03:14.455707Z",
+        "duration_s": 128.695588
+      },
+      {
+        "station_id": "BJS",
+        "start": "2025-06-01T00:03:14.455707Z",
+        "end": "2025-06-01T00:06:07.934530Z",
+        "duration_s": 173.478823
+      },
+      {
+        "station_id": "YEL",
+        "start": "2025-06-01T00:06:07.934530Z",
+        "end": "2025-06-01T00:07:38.505114Z",
+        "duration_s": 90.570584
+      },
+      {
+        "station_id": "RYU",
+        "start": "2025-06-01T00:07:38.505114Z",
+        "end": "2025-06-01T00:10:12.483339Z",
+        "duration_s": 153.978225
+      },
+      {
+        "station_id": "PHL",
+        "start": "2025-06-01T00:10:12.483339Z",
+        "end": "2025-06-01T00:13:36.099663Z",
+        "duration_s": 203.616324
+      }
+    ],
+    "switches": [
+      {
+        "time": "2025-06-01T00:03:14.455707Z",
+        "from_station_id": "ULN",
+        "to_station_id": "BJS"
+      },
+      {
+        "time": "2025-06-01T00:06:07.934530Z",
+        "from_station_id": "BJS",
+        "to_station_id": "YEL"
+      },
+      {
+        "time": "2025-06-01T00:07:38.505114Z",
+        "from_station_id": "YEL",
+        "to_station_id": "RYU"
+      },
+      {
+        "time": "2025-06-01T00:10:12.483339Z",
+        "from_station_id": "RYU",
+        "to_station_id": "PHL"
+      }
+    ]
+  },
+  "stations": [
+    {
+      "id": "ULN",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:01:05.760119Z",
+          "end": "2025-06-01T00:04:46.735022Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    },
+    {
+      "id": "BJS",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:03:14.455707Z",
+          "end": "2025-06-01T00:06:56.245738Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    },
+    {
+      "id": "YEL",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:06:07.934530Z",
+          "end": "2025-06-01T00:09:28.438941Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    },
+    {
+      "id": "RYU",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:07:38.505114Z",
+          "end": "2025-06-01T00:11:09.513900Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    },
+    {
+      "id": "PHL",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:10:12.483339Z",
+          "end": "2025-06-01T00:13:36.099663Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    }
+  ],
+  "unknown_intervals": [],
+  "search_start": "2025-06-01T00:00:00Z",
+  "search_end": "2025-06-01T00:30:00Z",
+  "diagnostics": {
+    "search_span_s": 1800.0,
+    "proven_visible_seconds": 750.3395439999999,
+    "proven_visible_fraction": 0.41685530222222217,
+    "unknown_seconds": 0.0,
+    "relay_covered_seconds": 750.339544,
+    "relay_coverage_fraction": 0.4168553022222222,
+    "station_count": 5
+  }
+}

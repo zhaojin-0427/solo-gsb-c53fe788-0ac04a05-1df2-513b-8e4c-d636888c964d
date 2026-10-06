@@ -1,0 +1,66 @@
+{
+  "status": "partial",
+  "plan": {
+    "start": "2025-06-01T00:01:05.760119Z",
+    "end": "2025-06-01T00:04:46.735022Z",
+    "duration_s": 220.974903,
+    "switch_count": 0,
+    "segments": [
+      {
+        "station_id": "ULN",
+        "start": "2025-06-01T00:01:05.760119Z",
+        "end": "2025-06-01T00:04:46.735022Z",
+        "duration_s": 220.974903
+      }
+    ],
+    "switches": []
+  },
+  "stations": [
+    {
+      "id": "ULN",
+      "status": "complete",
+      "min_elevation_deg": 25.0,
+      "proven_windows": [
+        {
+          "start": "2025-06-01T00:01:05.760119Z",
+          "end": "2025-06-01T00:04:46.735022Z",
+          "start_open": false,
+          "end_open": false,
+          "truncated": false
+        }
+      ],
+      "uncovered_intervals": []
+    },
+    {
+      "id": "GRAZE",
+      "status": "failed",
+      "min_elevation_deg": 85.67588427644527,
+      "proven_windows": [],
+      "uncovered_intervals": [
+        {
+          "start": "2025-06-01T00:05:05.709124Z",
+          "end": "2025-06-01T00:05:05.713400Z",
+          "reason": "possible short grazing pass: below-threshold interval not provably invisible and crossing not resolvable at 1 us reporting resolution"
+        }
+      ]
+    }
+  ],
+  "unknown_intervals": [
+    {
+      "start": "2025-06-01T00:05:05.709124Z",
+      "end": "2025-06-01T00:05:05.713400Z",
+      "reason": "station 'GRAZE': possible short grazing pass: below-threshold interval not provably invisible and crossing not resolvable at 1 us reporting resolution"
+    }
+  ],
+  "search_start": "2025-06-01T00:00:00Z",
+  "search_end": "2025-06-01T00:05:35Z",
+  "diagnostics": {
+    "search_span_s": 335.0,
+    "proven_visible_seconds": 220.974903,
+    "proven_visible_fraction": 0.659626576119403,
+    "unknown_seconds": 0.004276,
+    "relay_covered_seconds": 220.974903,
+    "relay_coverage_fraction": 0.659626576119403,
+    "station_count": 2
+  }
+}

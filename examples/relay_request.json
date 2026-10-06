@@ -1,0 +1,54 @@
+{
+  "epoch": "2025-06-01T00:00:00Z",
+  "start": "2025-06-01T00:00:00Z",
+  "end": "2025-06-01T00:30:00Z",
+  "satellite": {
+    "position_km": [
+      4270.307144917519,
+      -1323.5276198332833,
+      5121.271150639637
+    ],
+    "velocity_km_s": [
+      3.950957000514434,
+      6.347260232247907,
+      -1.6540865405752112
+    ]
+  },
+  "stations": [
+    {
+      "id": "ULN",
+      "latitude_deg": 45.0,
+      "longitude_deg": 108.0,
+      "altitude_km": 0.05,
+      "min_elevation_deg": 25.0
+    },
+    {
+      "id": "BJS",
+      "latitude_deg": 39.9,
+      "longitude_deg": 116.4,
+      "altitude_km": 0.05,
+      "min_elevation_deg": 25.0
+    },
+    {
+      "id": "YEL",
+      "latitude_deg": 35.0,
+      "longitude_deg": 128.0,
+      "altitude_km": 0.05,
+      "min_elevation_deg": 25.0
+    },
+    {
+      "id": "RYU",
+      "latitude_deg": 30.0,
+      "longitude_deg": 132.0,
+      "altitude_km": 0.05,
+      "min_elevation_deg": 25.0
+    },
+    {
+      "id": "PHL",
+      "latitude_deg": 20.0,
+      "longitude_deg": 135.0,
+      "altitude_km": 0.05,
+      "min_elevation_deg": 25.0
+    }
+  ]
+}
